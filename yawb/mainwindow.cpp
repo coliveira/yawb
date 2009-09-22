@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "graphical.h"
+#include "Resource.h"
 
 #define MAX_LOADSTRING 100
 
@@ -147,10 +147,8 @@ BOOL MainWindow::InitWindow(int nCmdShow) {
    return TRUE;
 }
 
-int APIENTRY _tWinMain(HINSTANCE hInstance,
-                     HINSTANCE hPrevInstance,
-                     LPTSTR    lpCmdLine,
-                     int       nCmdShow) {
+int APIENTRY o_tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+                     LPTSTR lpCmdLine, int nCmdShow) {
                          
     MSG msg;
     HACCEL hAccelTable;
