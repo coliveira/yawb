@@ -1,3 +1,5 @@
+// (c) 2009 by Carlos Oliveira
+
 #include "StdAfx.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>

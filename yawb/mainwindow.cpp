@@ -1,3 +1,5 @@
+// (c) 2009 by Carlos Oliveira
+
 #include "stdafx.h"
 #include "Resource.h"
 
