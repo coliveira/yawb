@@ -1,6 +1,9 @@
 // (c) 2009 by Carlos Oliveira
 
 #include "StdAfx.h"
+
+#include "Events.h"
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
@@ -83,13 +86,12 @@ bool Socket::Send(const char *sendbuf)
     // Send an initial buffer
     int iResult = send(socket_, sendbuf, (int)strlen(sendbuf), 0 );
     if (iResult == SOCKET_ERROR) {
-        printf("send failed: %d\n", WSAGetLastError());
+        Events::GetEvents()->AddEvent("send failed", Events::EV_ERROR);
         closesocket(socket_);
         WSACleanup();
         return false;
     }
-
-    printf("Bytes Sent: %ld\n", iResult);
+    Events::GetEvents()->AddEvent("Bytes Sent", Events::EV_INFO);
     return true;
 }
 
@@ -107,7 +109,7 @@ bool Socket::CreateSocket(addrinfo *addr)
 {
     socket_ = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
     if (socket_ == INVALID_SOCKET) {
-        printf("Error at socket(): %ld\n", WSAGetLastError());
+        Events::GetEvents()->AddEvent("Error at socket", Events::EV_ERROR);
         return false;
     }
     return true;
@@ -124,7 +126,7 @@ bool Socket::GetAddressInfo(const char *serverName, const char *hostPort, addrin
     // Resolve the server address and port
     int iResult = getaddrinfo(serverName, hostPort, &hints, &result);
     if ( iResult != 0 ) {
-        printf("getaddrinfo failed: %d\n", iResult);
+        Events::GetEvents()->AddEvent("getaddrinfo failed", Events::EV_ERROR);
         return false;
     }
     return true;
@@ -144,7 +146,7 @@ bool Socket::Connect(const char *serverName, const char *hostPort)
     freeaddrinfo(result);
 
     if (socket_ == INVALID_SOCKET) {
-        printf("Unable to connect to server!\n");
+        Events::GetEvents()->AddEvent("Unable to connect to server!", Events::EV_ERROR);
         return false;
     }
     return true;
@@ -158,7 +160,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     WSADATA wsaData;
     int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
     if (iResult != NO_ERROR) {
-        printf("WSAStartup failed: %d\n", iResult);
+        Events::GetEvents()->AddEvent("WSAStartup failed", Events::EV_ERROR);
         return 1;
     }
 
@@ -181,13 +183,13 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     do {
         bytesRead = s.Receive(recvbuf, recvbuflen);
         if ( bytesRead > 0 ) {
-            printf("\nBytes received: %d\n", bytesRead);
+            Events::GetEvents()->AddEvent("Bytes received", Events::EV_INFO);
             recvbuf[bytesRead] = '\0';
             fprintf(f, "%s", recvbuf);
         } else if ( bytesRead == 0 )
-            printf("\nConnection closed\n");
+            Events::GetEvents()->AddEvent("Connection closed", Events::EV_INFO);
         else
-            printf("recv failed: %d\n", WSAGetLastError());
+            Events::GetEvents()->AddEvent("recv failed", Events::EV_ERROR);
 
     } while( bytesRead > 0 );
 
