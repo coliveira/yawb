@@ -6,19 +6,51 @@
 
 class Socket {
 public:
-    Socket() : errorCause(0) {}
-    ~Socket() { closesocket(socket_); }
-    bool Create(UINT Port, LPCSTR zDottedAddr);
-    bool Connect(LPCSTR strAddr, UINT hostPort);
+    Socket();
+    ~Socket();
+    bool Connect(const char *serverName, const char *hostPort);
     int Receive(char *buf, int size);
+    bool Send(const char *sendbuf);
+
 private:
+    static bool Initialize();
+    static bool initialized;
+    bool TryConnection(addrinfo *addr);
+    bool CreateSocket(addrinfo *addr);
+    bool GetAddressInfo(const char *serverName, const char *hostPort, addrinfo* &result);
     SOCKET socket_;
     char *errorCause;
 };
 
+bool Socket::initialized = false;
+
+Socket::Socket() 
+    : socket_(INVALID_SOCKET)
+    , errorCause(0) 
+{
+    Initialize();
+}
+
+
+Socket::~Socket() 
+{
+    if (INVALID_SOCKET != socket_) closesocket(socket_); 
+}
+
+bool Socket::Initialize()
+{
+    if (!initialized) {
+        initialized = true;
+        WSADATA wsaData;
+        if (0 != WSAStartup(MAKEWORD(2,2), &wsaData)) return false;
+    }
+    return true;
+}
+
 #define SET_CAUSE(x)  case x: errorCause = #x; break;
 
-int Socket::Receive(char *buf, int size) {
+int Socket::Receive(char *buf, int size) 
+{
     int res = recv(socket_, buf, size, 0);
     if (res == SOCKET_ERROR) {
         switch (res) {
@@ -40,121 +72,112 @@ int Socket::Receive(char *buf, int size) {
             SET_CAUSE(WSAECONNRESET)
             default: errorCause = "unknown";
         }
-        return -1;
     }
     return res;
 }
 
-bool Socket::Create(UINT portNum, LPCSTR strAdr){
-
-   socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-   return socket_ != INVALID_SOCKET;
-}
-
-bool Socket::Connect(LPCSTR strAddr, UINT hostPort) {
-    DWORD addr = strAddr ? inet_addr(strAddr) : INADDR_ANY;
-
-    SOCKADDR_IN hostAddr;
-    hostAddr.sin_family      = (short)AF_INET;
-    hostAddr.sin_port        = htons((short)hostPort);
-    hostAddr.sin_addr.s_addr = addr;
-
-    int res = connect(socket_, (SOCKADDR *) &addr, sizeof(hostAddr));
-    if (res == SOCKET_ERROR) {
-        printf("error found:  %d\n", WSAGetLastError());
-    }
-    return res != SOCKET_ERROR;
-}
-
-/// This is a simple sample code that downloads the Google page.
-/// TODO: redo this to make it modular
-
-#define DEFAULT_BUFLEN 512
-#define DEFAULT_PORT "80"
-#define URL          "www.google.com"
-
-int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-                     LPTSTR lpCmdLine, int nCmdShow)
+bool Socket::Send(const char *sendbuf)
 {
-    WSADATA wsaData;
-    SOCKET ConnectSocket = INVALID_SOCKET;
-    struct addrinfo *result = NULL,
-                    *ptr = NULL,
-                    hints;
-    char *sendbuf = "GET /index.html HTTP/1.0\n\rFrom: someuser@jmarshall.com\n\rUser-Agent: HTTPTool/1.0\n\r\n\r";
-    char recvbuf[DEFAULT_BUFLEN];
-    int recvbuflen = DEFAULT_BUFLEN-1;
-    
-    // Initialize Winsock
-    int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
-    if (iResult != 0) {
-        printf("WSAStartup failed: %d\n", iResult);
-        return 1;
+    // Send an initial buffer
+    int iResult = send(socket_, sendbuf, (int)strlen(sendbuf), 0 );
+    if (iResult == SOCKET_ERROR) {
+        printf("send failed: %d\n", WSAGetLastError());
+        closesocket(socket_);
+        WSACleanup();
+        return false;
     }
 
+    printf("Bytes Sent: %ld\n", iResult);
+    return true;
+}
+
+bool Socket::TryConnection(addrinfo *addr)
+{
+    if (SOCKET_ERROR == connect(socket_, addr->ai_addr, (int)addr->ai_addrlen)) {
+        closesocket(socket_);
+        socket_ = INVALID_SOCKET;
+        return false;
+    }
+    return true;
+}
+
+bool Socket::CreateSocket(addrinfo *addr)
+{
+    socket_ = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+    if (socket_ == INVALID_SOCKET) {
+        printf("Error at socket(): %ld\n", WSAGetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool Socket::GetAddressInfo(const char *serverName, const char *hostPort, addrinfo* &result)
+{
+    addrinfo hints;
     ZeroMemory( &hints, sizeof(hints) );
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
     // Resolve the server address and port
-    iResult = getaddrinfo(URL, DEFAULT_PORT, &hints, &result);
+    int iResult = getaddrinfo(serverName, hostPort, &hints, &result);
     if ( iResult != 0 ) {
         printf("getaddrinfo failed: %d\n", iResult);
-        WSACleanup();
-        return 1;
+        return false;
     }
+    return true;
+}
+
+bool Socket::Connect(const char *serverName, const char *hostPort) 
+{
+    addrinfo *result;
+    if (!GetAddressInfo(serverName, hostPort, result))
+        return false;
 
     // Attempt to connect to an address until one succeeds
-    for(ptr=result; ptr != NULL ;ptr=ptr->ai_next) {
-
-        // Create a SOCKET for connecting to server
-        ConnectSocket = socket(ptr->ai_family, ptr->ai_socktype, 
-            ptr->ai_protocol);
-        if (ConnectSocket == INVALID_SOCKET) {
-            printf("Error at socket(): %ld\n", WSAGetLastError());
-            freeaddrinfo(result);
-            WSACleanup();
-            return 1;
-        }
-
-        // Connect to server.
-        iResult = connect( ConnectSocket, ptr->ai_addr, (int)ptr->ai_addrlen);
-        if (iResult == SOCKET_ERROR) {
-            closesocket(ConnectSocket);
-            ConnectSocket = INVALID_SOCKET;
-            continue;
-        }
-        break;
+    for(addrinfo *ptr=result; ptr != NULL ;ptr=ptr->ai_next) {
+        if (!CreateSocket(ptr)) break;
+        if (TryConnection(ptr)) break;
     }
-
     freeaddrinfo(result);
 
-    if (ConnectSocket == INVALID_SOCKET) {
+    if (socket_ == INVALID_SOCKET) {
         printf("Unable to connect to server!\n");
-        WSACleanup();
+        return false;
+    }
+    return true;
+}
+
+#define DEFAULT_BUFLEN 512
+
+int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+                       LPTSTR lpCmdLine, int nCmdShow)
+{
+    WSADATA wsaData;
+    int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
+    if (iResult != NO_ERROR) {
+        printf("WSAStartup failed: %d\n", iResult);
         return 1;
     }
 
-    // Send an initial buffer
-    iResult = send( ConnectSocket, sendbuf, (int)strlen(sendbuf), 0 );
-    if (iResult == SOCKET_ERROR) {
-        printf("send failed: %d\n", WSAGetLastError());
-        closesocket(ConnectSocket);
-        WSACleanup();
-        return 1;
-    }
+    Socket s;
+    bool res = s.Connect("www.google.com", "80");
+    if (!res) return 1;
 
-    printf("Bytes Sent: %ld\n", iResult);
+    char *sendbuf = "GET /index.html HTTP/1.0\n\rFrom: someuser@jmarshall.com\n\rUser-Agent: HTTPTool/1.0\n\r\n\r";
+    s.Send(sendbuf);
+
+    char recvbuf[DEFAULT_BUFLEN];
+    int recvbuflen = DEFAULT_BUFLEN-1;
 
     FILE *f;
     errno_t err = fopen_s(&f, "c:\\co\\g.html", "w");
     if (err != 0) return -1;
 
+
     int bytesRead = 0;
-    // Receive until the peer closes the connection
     do {
-        bytesRead = recv(ConnectSocket, recvbuf, recvbuflen, 0);
+        bytesRead = s.Receive(recvbuf, recvbuflen);
         if ( bytesRead > 0 ) {
             printf("\nBytes received: %d\n", bytesRead);
             recvbuf[bytesRead] = '\0';
@@ -166,29 +189,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     } while( bytesRead > 0 );
 
-    // cleanup
-    closesocket(ConnectSocket);
     WSACleanup();
 
     return 0;
 }
-
-
-int oldMain()
-{
-    WSADATA wsaData;
-    int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
-    if (iResult != NO_ERROR) {
-      printf("WSAStartup failed: %d\n", iResult);
-      return 1;
-    }
-
-    Socket s;
-    s.Create(80, "64.233.169.103");
-    bool res = s.Connect("64.233.169.103", 80);
-    if (!res) return 1;
-
-    char buf[100];
-    s.Receive(buf, 100);
-}
-
